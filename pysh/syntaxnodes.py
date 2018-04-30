@@ -18,9 +18,6 @@ class ArgumentPartNode(SyntaxNode):
         self.type = type
         self.value = value
 
-    def __repr__(self) -> str:
-        return '<ArgumentPartNode type: {0}, value: {1}>'.format(repr(self.type), repr(self.value))
-
     def accept(self, visitor: 'SyntaxNodeVisitor') -> None:
         visitor.visit_argument_part_node(self)
 
@@ -29,22 +26,26 @@ class ArgumentNode(SyntaxNode):
     def __init__(self) -> None:
         self.parts: List[ArgumentPartNode] = []
 
-    def __repr__(self) -> str:
-        return '<ArgumentNode parts: {0}>'.format(repr(self.parts))
-
     def accept(self, visitor: 'SyntaxNodeVisitor') -> None:
         visitor.visit_argument_node(self)
 
 
-class ExpressionNode(SyntaxNode):
-    def __init__(self, args: List[ArgumentNode]) -> None:
-        self.args = args
-
-    def __repr__(self) -> str:
-        return '<ExpressionNode args: {0}>'.format(repr(self.args))
+class AssignmentNode(SyntaxNode):
+    def __init__(self, var_name: str, expr: ArgumentNode) -> None:
+        self.var_name = var_name
+        self.expr = expr
 
     def accept(self, visitor: 'SyntaxNodeVisitor') -> None:
-        visitor.visit_expression_node(self)
+        visitor.visit_assignment_node(self)
+
+
+class CommandNode(SyntaxNode):
+    def __init__(self, args: List[ArgumentNode], env_assignments: List[AssignmentNode]) -> None:
+        self.args = args
+        self.env_assignments = env_assignments
+
+    def accept(self, visitor: 'SyntaxNodeVisitor') -> None:
+        visitor.visit_command_node(self)
 
 
 class SyntaxNodeVisitor(object):
@@ -54,5 +55,8 @@ class SyntaxNodeVisitor(object):
     def visit_argument_node(self, node: ArgumentNode) -> None:
         pass
 
-    def visit_expression_node(self, node: ExpressionNode) -> None:
+    def visit_command_node(self, node: CommandNode) -> None:
+        pass
+
+    def visit_assignment_node(self, node: AssignmentNode) -> None:
         pass

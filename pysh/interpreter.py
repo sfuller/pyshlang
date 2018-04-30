@@ -1,10 +1,10 @@
 import sys
 from typing import List, Iterable, Dict
 
-from pysh.codegen import Instruction, InstructionVisitor, SubstituteInstruction, CallInstruction, \
-    ConcatInstruction, SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
-    IncrementAInstruction, PushAInstruction, BranchReturnValueInstruction, BranchBufferEmptyInstruction, \
-    JumpRelativeInstruction
+from pysh.instructions import InstructionVisitor, Instruction, ConcatInstruction, SubstituteInstruction, \
+    SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
+    IncrementAInstruction, PushAInstruction, CallInstruction, BranchReturnValueInstruction, \
+    BranchBufferEmptyInstruction, JumpRelativeInstruction, SetVarInstruction
 
 
 class Context(object):
@@ -24,6 +24,7 @@ class Interpreter(InstructionVisitor):
         self.pc = 0
         self.buffer = ''
         self.reg_a = 0
+        self.reg_b = 0
 
     def execute(self, code: Iterable[Instruction]) -> None:
         self.code.extend(code)
@@ -64,7 +65,6 @@ class Interpreter(InstructionVisitor):
 
     def visit_push_buffer(self, instruction: PushBufferInstruction) -> None:
         self.stack.append(self.buffer)
-        self.buffer = ''
 
     def visit_reset_a(self, instruction: ResetAInstruction) -> None:
         self.reg_a = 0
@@ -83,6 +83,10 @@ class Interpreter(InstructionVisitor):
         args = self.stack[stack_start:]
         del self.stack[stack_start:]
         print('CALL ' + repr(args))
+
+    def visit_set_var(self, instruction: SetVarInstruction) -> None:
+        var_name = self.stack.pop()
+        self.context.variables[var_name] = self.buffer
 
     def visit_branch_return_value(self, instruction: BranchReturnValueInstruction) -> None:
         raise Exception("TODO")

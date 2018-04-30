@@ -8,6 +8,7 @@ from pysh.il import GenerateILVisitor
 from pysh.interpreter import Interpreter
 from pysh.lexer import Lexer
 from pysh.parser import Parser, ParseError
+from pysh.syntaxnoderepr import SyntaxNodeReprVisitor
 from pysh.syntaxnodes import SyntaxNode
 
 
@@ -18,73 +19,92 @@ class InteractiveMode(enum.Enum):
     Lex = 3
 
 
-def print_prompt() -> None:
-    sys.stdout.write('pysh$ ')
-    sys.stdout.flush()
-
-
-def print_code(code: Iterable[Instruction]) -> None:
-    visitor = GenerateILVisitor()
-    for instruction in code:
-        instruction.accept(visitor)
-    print(visitor.make_il())
-
-
 def make_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('execute', 'codegen', 'parse', 'lex'), default='execute')
+    parser.add_argument('-c', '--command', dest='command')
     return parser
 
 
-def main() -> int:
-    parser = make_argparser()
-    args = parser.parse_args()
-    mode = InteractiveMode.Execute
-    if args.mode == 'execute':
+class Interactive(object):
+    def __init__(self) -> None:
+        self.is_command = False
+
+    def print_prompt(self) -> None:
+        if self.is_command:
+            return
+        sys.stdout.write('pysh$ ')
+        sys.stdout.flush()
+
+    def print_code(self, code: Iterable[Instruction]) -> None:
+        visitor = GenerateILVisitor()
+        for instruction in code:
+            instruction.accept(visitor)
+        print(visitor.make_il())
+
+    def main(self) -> int:
+        parser = make_argparser()
+        args = parser.parse_args()
         mode = InteractiveMode.Execute
-    elif args.mode == 'codegen':
-        mode = InteractiveMode.GenerateCode
-    elif args.mode == 'parse':
-        mode = InteractiveMode.Parse
-    elif args.mode == 'lex':
-        mode = InteractiveMode.Lex
+        if args.mode == 'execute':
+            mode = InteractiveMode.Execute
+        elif args.mode == 'codegen':
+            mode = InteractiveMode.GenerateCode
+        elif args.mode == 'parse':
+            mode = InteractiveMode.Parse
+        elif args.mode == 'lex':
+            mode = InteractiveMode.Lex
 
-    lexer = Lexer()
-    parser = Parser()
-    generator = CodeGenerator()
-    interpreter = Interpreter()
+        input_source = sys.stdin
+        if args.command:
+            input_source = [args.command]
+            self.is_command = True
 
-    print_prompt()
+        lexer = Lexer()
+        parser = Parser()
+        generator = CodeGenerator()
+        interpreter = Interpreter()
 
-    for line in sys.stdin:
-        line = line + '\n'
+        self.print_prompt()
 
-        ast: Optional[List[SyntaxNode]] = None
-        code: Optional[List[Instruction]] = None
+        for line in input_source:
+            line = line + '\n'
 
-        tokens = lexer.lex_all(line)
+            def tick() -> None:
+                ast: Optional[List[SyntaxNode]] = None
+                code: Optional[List[Instruction]] = None
 
-        try:
-            ast = parser.parse(tokens)
-        except ParseError as e:
-            sys.stderr.write(str(e))
-            sys.stderr.write('\n')
+                tokens = lexer.lex_all(line)
+                if mode is InteractiveMode.Lex:
+                    print(repr(tokens))
+                    return
 
-        if ast is not None:
-            code = generator.generate(ast)
+                try:
+                    ast = parser.parse(tokens)
+                except ParseError as e:
+                    sys.stderr.write(str(e))
+                    sys.stderr.write('\n')
+                if mode is InteractiveMode.Parse:
+                    if ast is not None:
+                        visitor = SyntaxNodeReprVisitor()
+                        for node in ast:
+                            node.accept(visitor)
+                        print(str(visitor))
+                    return
 
-        if mode is InteractiveMode.Execute:
-            if code is not None:
-                interpreter.execute(code)
-        elif mode is InteractiveMode.GenerateCode:
-            if code is not None:
-                print_code(code)
-        elif mode is InteractiveMode.Parse:
-            if ast is not None:
-                print(repr(ast))
-        elif mode is InteractiveMode.Lex:
-            print(repr(tokens))
+                if ast is None:
+                    return
 
-        print_prompt()
+                code = generator.generate(ast)
+                if mode is InteractiveMode.GenerateCode:
+                    if code is not None:
+                        self.print_code(code)
+                    return
 
-    return 0
+                if code is not None:
+                    interpreter.execute(code)
+
+            tick()
+            self.print_prompt()
+
+        return 0

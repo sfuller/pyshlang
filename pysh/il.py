@@ -1,8 +1,9 @@
 from typing import List
 
-from pysh.codegen import InstructionVisitor, ConcatInstruction, SubstituteInstruction, SubstituteSingleInstruction, \
-    LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, IncrementAInstruction, PushAInstruction, \
-    CallInstruction, BranchReturnValueInstruction, BranchBufferEmptyInstruction, JumpRelativeInstruction
+from pysh.instructions import InstructionVisitor, ConcatInstruction, SubstituteInstruction, \
+    SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
+    IncrementAInstruction, PushAInstruction, CallInstruction, SetVarInstruction, BranchReturnValueInstruction, \
+    BranchBufferEmptyInstruction, JumpRelativeInstruction
 
 
 class GenerateILVisitor(InstructionVisitor):
@@ -35,6 +36,9 @@ class GenerateILVisitor(InstructionVisitor):
 
     def visit_call(self, instruction: CallInstruction) -> None:
         self.parts.append('call\n')
+
+    def visit_set_var(self, instruction: SetVarInstruction) -> None:
+        self.parts.append('setvar\n')
 
     def visit_branch_return_value(self, instruction: BranchReturnValueInstruction) -> None:
         self.parts.append('brv {0}\n'.format(instruction.offset))

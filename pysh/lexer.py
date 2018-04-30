@@ -13,6 +13,7 @@ class TokenType(enum.Enum):
     THEN = 6
     FI = 7
     QUOTES = 8
+    ASSIGNMENT = 9
 
 
 class Token(object):
@@ -62,6 +63,7 @@ class Lexer(object):
     newline_pattern = re.compile(r'^\n+')
     semicolon_pattern = re.compile(r'^;')
     quotes_pattern = re.compile(r'^"')
+    assignment_pattern = re.compile(r'^=')
     symbol_pattern = re.compile(r'^[a-zA-Z]+')
     simple_replacement_pattern = re.compile(r'^\$([a-zA-Z]+)')
     block_replacement_pattern = re.compile(r'^\${([a-zA-Z]+)}')
@@ -95,6 +97,9 @@ class Lexer(object):
     def lex_quotes(self, match: Match) -> Token:
         return SimpleToken(TokenType.QUOTES)
 
+    def lex_assignment(self, match: Match) -> Token:
+        return SimpleToken(TokenType.ASSIGNMENT)
+
     def lex_symbol(self, match: Match) -> SymbolToken:
         token = SymbolToken()
         token.value = match.group(0)
@@ -110,6 +115,7 @@ class Lexer(object):
         (newline_pattern, lex_end_of_statement),
         (semicolon_pattern, lex_end_of_statement),
         (quotes_pattern, lex_quotes),
+        (assignment_pattern, lex_assignment),
         (symbol_pattern, lex_symbol),
         (simple_replacement_pattern, lex_replacement),
         (block_replacement_pattern, lex_replacement)
