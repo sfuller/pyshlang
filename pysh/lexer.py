@@ -64,9 +64,9 @@ class Lexer(object):
     semicolon_pattern = re.compile(r'^;')
     quotes_pattern = re.compile(r'^"')
     assignment_pattern = re.compile(r'^=')
-    symbol_pattern = re.compile(r'^[a-zA-Z]+')
-    simple_replacement_pattern = re.compile(r'^\$([a-zA-Z]+)')
-    block_replacement_pattern = re.compile(r'^\${([a-zA-Z]+)}')
+    symbol_pattern = re.compile(r'^[a-zA-Z0-9]+')
+    simple_replacement_pattern = re.compile(r'^\$([a-zA-Z0-9]+)')
+    block_replacement_pattern = re.compile(r'^\${([a-zA-Z0-9]+)}')
 
     def __init__(self) -> None:
         pass

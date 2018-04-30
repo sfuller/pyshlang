@@ -5,7 +5,7 @@ from typing import Optional, List, Iterable
 
 from pysh.codegen import CodeGenerator, Instruction
 from pysh.il import GenerateILVisitor
-from pysh.interpreter import Interpreter
+from pysh.interpreter import Interpreter, install_builtins
 from pysh.lexer import Lexer
 from pysh.parser import Parser, ParseError
 from pysh.syntaxnoderepr import SyntaxNodeReprVisitor
@@ -64,6 +64,8 @@ class Interactive(object):
         parser = Parser()
         generator = CodeGenerator()
         interpreter = Interpreter()
+
+        install_builtins(interpreter)
 
         self.print_prompt()
 

@@ -1,6 +1,9 @@
+import os
 import sys
-from typing import List, Iterable, Dict
+from typing import List, Iterable, Dict, Callable, Tuple
 
+from pysh import builtins
+from pysh.builtins import InvokeInfo
 from pysh.instructions import InstructionVisitor, Instruction, ConcatInstruction, SubstituteInstruction, \
     SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
     IncrementAInstruction, PushAInstruction, CallInstruction, BranchReturnValueInstruction, \
@@ -10,6 +13,8 @@ from pysh.instructions import InstructionVisitor, Instruction, ConcatInstruction
 class Context(object):
     def __init__(self) -> None:
         self.variables: Dict[str, str] = {}
+        self.exported_variables: List[str] = []
+        self.pwd = os.getcwd()
 
 
 class ExecutionError(Exception):
@@ -21,10 +26,12 @@ class Interpreter(InstructionVisitor):
         self.context = Context()
         self.stack: List[str] = []
         self.code: List[Instruction] = []
+        self.builtins: Dict[str, Callable[[InvokeInfo], int]] = {}
         self.pc = 0
         self.buffer = ''
         self.reg_a = 0
         self.reg_b = 0
+        self.rv = 0
 
     def execute(self, code: Iterable[Instruction]) -> None:
         self.code.extend(code)
@@ -82,7 +89,22 @@ class Interpreter(InstructionVisitor):
         stack_start = stack_len - self.reg_a
         args = self.stack[stack_start:]
         del self.stack[stack_start:]
-        print('CALL ' + repr(args))
+
+        if len(args) is 0:
+            return
+
+        command_name = args[0]
+
+        target: Callable[[InvokeInfo], int]
+        target = self.builtins.get(command_name)
+
+        if target is None:
+            self.rv = 127
+            sys.stderr.write('pysh: {0}: command not found\n'.format(command_name))
+            return
+
+        invoke_info = InvokeInfo(args[1:], self.get_child_env(), '', self.context.pwd)
+        self.rv = target(invoke_info)
 
     def visit_set_var(self, instruction: SetVarInstruction) -> None:
         var_name = self.stack.pop()
@@ -97,3 +119,15 @@ class Interpreter(InstructionVisitor):
 
     def visit_jump_relative(self, instruction: JumpRelativeInstruction) -> None:
         self.pc += instruction.offset
+
+    def get_child_env(self) -> List[Tuple[str, str]]:
+        env: List[Tuple[str, str]] = []
+        for var_name in self.context.exported_variables:
+            env.append((var_name, self.context.variables.get(var_name, '')))
+        return env
+
+
+def install_builtins(interpreter: Interpreter) -> None:
+    registry = interpreter.builtins
+    registry['ls'] = builtins.ls
+    registry['exit'] = builtins.exit
