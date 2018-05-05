@@ -1,5 +1,5 @@
 from typing import List, Iterable, Optional
-from pysh.lexer import Token, TokenType, SymbolToken, ReplacementToken
+from pysh.lexer import Token, TokenType
 from pysh.syntaxnodes import SyntaxNode, ArgumentNode, ArgumentPartNode, ArgumentPartType, CommandNode, \
     AssignmentNode
 
@@ -10,8 +10,10 @@ class ParseError(Exception):
 
 
 class StateTickResult(object):
-    def __init__(self, *, is_done: bool, tokens_to_eat: int = 0, child_state: Optional['ParserState'] = None) -> None:
+    def __init__(self, *, is_done: bool = False, is_incomplete: bool = False, tokens_to_eat: int = 0,
+                 child_state: Optional['ParserState'] = None) -> None:
         self.is_done = is_done
+        self.is_incomplete = is_incomplete
         self.tokens_to_eat = tokens_to_eat
         self.child_state = child_state
 
@@ -20,8 +22,7 @@ class ParserState(object):
     def tick(self, tokens: List[Token]) -> StateTickResult:
         return StateTickResult(is_done=True, tokens_to_eat=0)
 
-    @property
-    def nodes(self) -> Iterable[SyntaxNode]:
+    def take_nodes(self) -> List[SyntaxNode]:
         return []
 
 
@@ -33,90 +34,135 @@ class TopLevelExpressionState(ParserState):
         if self.child_state is not None:
             return StateTickResult(is_done=True, tokens_to_eat=0)
 
+        if len(tokens) is 0:
+            return StateTickResult(is_done=True)
+
         type = tokens[0].type
 
         if type is TokenType.WHITESPACE or type is TokenType.EOS:
-            return self.enter_child(WhitespaceState())
-        elif type is TokenType.SYMBOL or type is TokenType.REPLACEMENT:
+            return StateTickResult(is_done=True, tokens_to_eat=1)
+        elif type is TokenType.SYMBOL or type is TokenType.DOLLAR_SIGN or type is TokenType.QUOTES:
             return self.enter_child(ExpressionState())
 
-        raise ParseError('Unexpected token ' + str(type))
+        raise ParseError('Unexpected token {0} in top level expression'.format(type))
 
     def enter_child(self, child_state: ParserState) -> StateTickResult:
         self.child_state = child_state
         return StateTickResult(is_done=False, tokens_to_eat=0, child_state=child_state)
 
-    @property
-    def nodes(self):
-        return self.child_state.nodes
+    def take_nodes(self) -> List[SyntaxNode]:
+        if self.child_state is None:
+            return []
+        return self.child_state.take_nodes()
 
 
-class WhitespaceState(ParserState):
+class ReplacementState(ParserState):
+    def __init__(self) -> None:
+        self.has_parsed_prefix = False
+        self.has_parsed_key = False
+        self.is_block_syntax = False
+        self.key_parts: List[str] = []
+
     def tick(self, tokens: List[Token]) -> StateTickResult:
+        if not self.has_parsed_prefix:
+            self.has_parsed_prefix = True
+            if len(tokens) < 2:
+                return StateTickResult(is_incomplete=True)
+            if tokens[1].type is TokenType.LEFT_CURLY_BRACKET:
+                self.is_block_syntax = True
+                return StateTickResult(tokens_to_eat=2)
+            return StateTickResult(tokens_to_eat=1)
+
         if len(tokens) is 0:
-            return StateTickResult(is_done=True, tokens_to_eat=0)
-        token = tokens[0]
-        if token.type is TokenType.WHITESPACE or token.type is TokenType.EOS:
-            return StateTickResult(is_done=False, tokens_to_eat=1)
-        else:
-            return StateTickResult(is_done=True, tokens_to_eat=0)
+            return StateTickResult(is_incomplete=True)
+
+        # Parse inners
+        if not self.has_parsed_key:
+            token = tokens[0]
+            if token.type is TokenType.RIGHT_CURLY_BRACKET:
+                if self.is_block_syntax:
+                    self.has_parsed_key = True
+                    return StateTickResult(tokens_to_eat=0)
+                raise ParseError('Unexpected {0}'.format(token.value))
+
+            if token.type is TokenType.SYMBOL:
+                self.key_parts.append(token.value)
+                return StateTickResult(tokens_to_eat=1)
+
+            self.has_parsed_key = True
+            return StateTickResult()
+
+        # Parse ending bracket if applicable
+        if self.is_block_syntax:
+            token = tokens[0]
+            if token.type is not TokenType.RIGHT_CURLY_BRACKET:
+                raise ParseError('Expecting }')
+            return StateTickResult(is_done=True, tokens_to_eat=1)
+
+        return StateTickResult(is_done=True)
+
+    def take_nodes(self) -> List[SyntaxNode]:
+        return []
+
+    def get_replacement_key(self) -> str:
+        return ''.join(self.key_parts)
 
 
 class ArgumentState(ParserState):
-    def __init__(self):
+    def __init__(self) -> None:
         self.arg_parts: List[ArgumentPartNode] = []
         self.is_inside_quotes = False
+        self.replacement_state: Optional[ReplacementState] = None
+        self.parsed_nodes: List[SyntaxNode] = []
+        self.node = ArgumentNode()
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
-        if len(tokens) < 2:
-            return StateTickResult(is_done=False, tokens_to_eat=0)
+        if self.replacement_state is not None:
+            type = ArgumentPartType.REPLACEMENT_SINGLE if self.is_inside_quotes else ArgumentPartType.REPLACEMENT
+            self.arg_parts.append(ArgumentPartNode(type, self.replacement_state.get_replacement_key()))
+            self.replacement_state = None
+
+        if len(tokens) is 0:
+            return StateTickResult(is_incomplete=True)
+
         token = tokens[0]
-        next_token = tokens[1].type
 
-        if token.type is TokenType.WHITESPACE and self.is_inside_quotes:
+        if token.type is TokenType.WHITESPACE or token.type is TokenType.EOS:
             if self.is_inside_quotes:
-                token: SymbolToken = token
-                # TODO: store whitespace value with whitespace token
-                part_node = ArgumentPartNode(ArgumentPartType.CONSTANT, ' ')
+                part_node = ArgumentPartNode(ArgumentPartType.CONSTANT, token.value)
                 self.arg_parts.append(part_node)
+                return StateTickResult(tokens_to_eat=1)
+            else:
+                return self._finish_node()
 
-        elif token.type is TokenType.QUOTES:
+        if token.type is TokenType.QUOTES:
             self.is_inside_quotes = not self.is_inside_quotes
+            return StateTickResult(tokens_to_eat=1)
 
-        elif token.type is TokenType.SYMBOL:
-            token: SymbolToken = token
+        if token.type is TokenType.SYMBOL:
             part_node = ArgumentPartNode(ArgumentPartType.CONSTANT, token.value)
             self.arg_parts.append(part_node)
+            return StateTickResult(tokens_to_eat=1)
 
-        elif token.type is TokenType.REPLACEMENT:
-            token: ReplacementToken = token
-            type = ArgumentPartType.REPLACEMENT_SINGLE if self.is_inside_quotes else ArgumentPartType.REPLACEMENT
-            part_node = ArgumentPartNode(type, token.value)
-            self.arg_parts.append(part_node)
+        if token.type is TokenType.DOLLAR_SIGN:
+            self.replacement_state = ReplacementState()
+            return StateTickResult(child_state=self.replacement_state)
 
-        else:
-            raise ParseError('Unexpected token while parsing expression: ' + str(token.type))
+        raise ParseError('Unexpected token while parsing expression: ' + str(token.type))
 
-        is_done = False
-        if next_token is TokenType.WHITESPACE and not self.is_inside_quotes:
-            is_done = True
-        if next_token is TokenType.EOS:
-            if self.is_inside_quotes:
-                raise ParseError('Unexpected end of string. Expecting end of quotes.')
-            else:
-                is_done = True
-
-        return StateTickResult(is_done=is_done, tokens_to_eat=1)
-
-    @property
-    def nodes(self) -> Iterable[SyntaxNode]:
-        return [self.make_argument_node()]
+    def take_nodes(self) -> List[SyntaxNode]:
+        nodes = self.parsed_nodes
+        self.parsed_nodes = []
+        return nodes
 
     def make_argument_node(self) -> ArgumentNode:
-        arg_node = ArgumentNode()
-        arg_node.parts = self.arg_parts
+        return self.node
+
+    def _finish_node(self) -> StateTickResult:
+        self.node.parts = self.arg_parts
         self.arg_parts = []
-        return arg_node
+        self.parsed_nodes.append(self.node)
+        return StateTickResult(is_done=True, tokens_to_eat=0)
 
 
 class ExpressionState(ParserState):
@@ -124,46 +170,52 @@ class ExpressionState(ParserState):
         self.assignments: List[AssignmentNode] = []
         self.assignment_state: Optional[AssignmentState] = None
         self.command_state: Optional[CommandState] = None
-        self.finished_assignments = False
+        self.has_parsed_assignments = False
+        self.has_parsed_command = False
+        self.parsed_nodes = []
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
         if self.assignment_state is not None:
             # We have returned from parsing an env assignment.
-            self.assignments.append(self.assignment_state.make_assignment_node())
+            self.assignments.append(self.assignment_state.node)
             self.assignment_state = None
 
         if self.command_state is not None:
-            return StateTickResult(is_done=True, tokens_to_eat=0)
+            self.has_parsed_command = True
 
+        if len(tokens) is 0:
+            return StateTickResult(is_incomplete=True)
         token = tokens[0]
 
         # Eat whitespace
         if token.type == TokenType.WHITESPACE:
-            return StateTickResult(is_done=False, tokens_to_eat=1)
+            return StateTickResult(tokens_to_eat=1)
 
         if token.type == TokenType.EOS:
+            # Finish parsing expression
+            if self.command_state is not None and len(self.command_state.args) > 0:
+                # We are invoking a command, not assigning variables.
+                self.parsed_nodes.append(CommandNode(self.command_state.args, self.assignments))
+            else:
+                # We are making variable assignments.
+                self.parsed_nodes.extend(self.assignments)
+            self.assignments = []
             return StateTickResult(is_done=True, tokens_to_eat=1)
 
-        if not self.finished_assignments:
-            if len(tokens) < 2:
-                return StateTickResult(is_done=False, tokens_to_eat=0)
-            if tokens[0].type == TokenType.SYMBOL and tokens[1].type == TokenType.ASSIGNMENT:
+        if not self.has_parsed_assignments:
+            next_token = None if len(tokens) < 2 else tokens[1]
+            if token.type is TokenType.SYMBOL and next_token is not None and next_token.type is TokenType.ASSIGNMENT:
                 self.assignment_state = AssignmentState()
-                return StateTickResult(is_done=False, tokens_to_eat=0, child_state=self.assignment_state)
-            self.finished_assignments = True
+                return StateTickResult(child_state=self.assignment_state)
+            self.has_parsed_assignments = True
 
-        self.command_state = CommandState()
-        return StateTickResult(is_done=False, tokens_to_eat=0, child_state=self.command_state)
+        if not self.has_parsed_command:
+            self.command_state = CommandState()
+            return StateTickResult(child_state=self.command_state)
 
-    @property
-    def nodes(self) -> Iterable[SyntaxNode]:
-        nodes = []
-        if self.command_state is not None and len(self.command_state.argument_nodes) > 0:
-            # We are invoking a command, not assigning variables.
-            nodes.append(CommandNode(self.command_state.argument_nodes, self.assignments))
-        else:
-            # We are making variable assignments.
-            nodes.extend(self.assignments)
+    def take_nodes(self) -> Iterable[SyntaxNode]:
+        nodes = self.parsed_nodes
+        self.parsed_nodes = []
         return nodes
 
 
@@ -177,50 +229,53 @@ class CommandState(ParserState):
             self.args.append(self.arg_state.make_argument_node())
             self.arg_state = None
 
+        if len(tokens) is 0:
+            return StateTickResult(is_incomplete=True)
         token = tokens[0]
 
         if token.type == TokenType.WHITESPACE:
-            return StateTickResult(is_done=False, tokens_to_eat=1)
+            return StateTickResult(tokens_to_eat=1)
 
         if token.type == TokenType.EOS:
-            return StateTickResult(is_done=True, tokens_to_eat=1)
+            return StateTickResult(is_done=True, tokens_to_eat=0)
 
         self.arg_state = ArgumentState()
-        return StateTickResult(is_done=False, tokens_to_eat=0, child_state=self.arg_state)
+        return StateTickResult(child_state=self.arg_state)
 
-    @property
-    def nodes(self) -> Iterable[SyntaxNode]:
+    def take_nodes(self) -> List[SyntaxNode]:
         return []
-
-    @property
-    def argument_nodes(self):
-        return self.args
 
 
 class AssignmentState(ParserState):
     def __init__(self) -> None:
         self.lhs_var_name: Optional[str] = None
         self.rhs_arg_state: Optional[ArgumentState] = None
+        self.parsed_nodes: List[SyntaxNode] = []
+        self.node = AssignmentNode()
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
+        if len(tokens) is 0:
+            return StateTickResult(is_incomplete=True)
+
         if self.lhs_var_name is None:
             # Eat symbol and assignment operator
-            token: SymbolToken = tokens[0]
+            token = tokens[0]
             self.lhs_var_name = token.value
-            return StateTickResult(is_done=False, tokens_to_eat=2)
+            return StateTickResult(tokens_to_eat=2)
 
         if self.rhs_arg_state is None:
             self.rhs_arg_state = ArgumentState()
-            return StateTickResult(is_done=False, tokens_to_eat=0, child_state=self.rhs_arg_state)
+            return StateTickResult(child_state=self.rhs_arg_state)
 
+        self.node.var_name = self.lhs_var_name
+        self.node.expr = self.rhs_arg_state.make_argument_node()
+        self.parsed_nodes.append(self.node)
         return StateTickResult(is_done=True, tokens_to_eat=0)
 
-    @property
-    def nodes(self) -> Iterable[SyntaxNode]:
-        return [self.make_assignment_node()]
-
-    def make_assignment_node(self) -> AssignmentNode:
-        return AssignmentNode(self.lhs_var_name, self.rhs_arg_state.make_argument_node())
+    def take_nodes(self) -> List[SyntaxNode]:
+        nodes = self.parsed_nodes
+        self.parsed_nodes = []
+        return nodes
 
 
 class Parser(object):
@@ -232,18 +287,18 @@ class Parser(object):
         self.nodes: List[SyntaxNode] = []
 
     def parse(self, tokens: List[Token]) -> List[SyntaxNode]:
-        self.tokens = tokens
+        self.tokens.extend(tokens)
         self.process_tokens()
-        result_nodes = self.nodes
-        self.nodes = []
-        return result_nodes
+        if self.is_done:
+            result_nodes = self.nodes
+            self.nodes = []
+            return result_nodes
+        return []
 
     def process_tokens(self) -> None:
-        self.state = TopLevelExpressionState()
-        while len(self.tokens) > 0 or self.state is not None:
-            if self.state is None:
-                self.state = TopLevelExpressionState()
-
+        if self.state is None:
+            self.state = TopLevelExpressionState()
+        while self.state is not None:
             result = self.state.tick(self.tokens)
             del self.tokens[:result.tokens_to_eat]
             if result.child_state is not None:
@@ -254,14 +309,13 @@ class Parser(object):
                 if len(self.state_stack) > 0:
                     self.state = self.state_stack.pop()
                 else:
-                    self.nodes.extend(self.state.nodes)
-                    self.state = None
-
-    def pop_token(self) -> Token:
-        # TODO: This sucks performance wise
-        token = self.tokens[0]
-        self.tokens = self.tokens[1:]
-        return token
+                    self.nodes.extend(self.state.take_nodes())
+                    if len(self.tokens) > 0:
+                        self.state = TopLevelExpressionState()
+                    else:
+                        self.state = None
+            if result.is_incomplete:
+                break
 
     @property
     def is_done(self) -> bool:

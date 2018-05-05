@@ -31,9 +31,9 @@ class ArgumentNode(SyntaxNode):
 
 
 class AssignmentNode(SyntaxNode):
-    def __init__(self, var_name: str, expr: ArgumentNode) -> None:
-        self.var_name = var_name
-        self.expr = expr
+    def __init__(self) -> None:
+        self.var_name: str = ''
+        self.expr = ArgumentNode()
 
     def accept(self, visitor: 'SyntaxNodeVisitor') -> None:
         visitor.visit_assignment_node(self)

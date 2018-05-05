@@ -25,3 +25,9 @@ def exit(info: InvokeInfo) -> int:
         except ValueError:
             pass
     sys.exit(rv)
+
+
+def echo(info: InvokeInfo) -> int:
+    print(' '.join(info.arguments))
+    return 0
+

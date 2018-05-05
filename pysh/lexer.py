@@ -1,6 +1,5 @@
 import enum
-from typing import List, Match, Tuple, Pattern, Callable
-import re
+from typing import List, Tuple, Callable, Optional
 
 
 class TokenType(enum.Enum):
@@ -8,7 +7,9 @@ class TokenType(enum.Enum):
     WHITESPACE = 1
     EOS = 2
     SYMBOL = 3
-    REPLACEMENT = 4
+    DOLLAR_SIGN = 4
+    LEFT_CURLY_BRACKET = 5
+    RIGHT_CURLY_BRACKET = 6
     IF = 5
     THEN = 6
     FI = 7
@@ -17,59 +18,33 @@ class TokenType(enum.Enum):
 
 
 class Token(object):
-    @property
-    def type(self) -> TokenType:
-        return TokenType.UNKNOWN
-
-
-class SimpleToken(Token):
-    def __init__(self, type: TokenType) -> None:
-        self._type = type
+    def __init__(self, type: TokenType, value: str) -> None:
+        self.type = type
+        self.value = value
 
     def __repr__(self) -> str:
-        return '<SimpleToken type: {0}>'.format(self._type)
-
-    @property
-    def type(self) -> TokenType:
-        return self._type
+        return '<Token type: {0}, value: {1}>'.format(self.type, self.value)
 
 
-class SymbolToken(Token):
-    def __init__(self) -> None:
-        self.value = ''
+class TokenLexDefinition(object):
+    def __init__(self, *, character: Optional[str] = None, matcher: Optional[Callable[[str], bool]] = None,
+                 is_compound=False, token_func: Optional[Callable[[str], Token]] = None,
+                 token_type: Optional[TokenType] = None) -> None:
+        self.character = character
+        self.matcher = matcher
+        self.is_compound = is_compound
+        self.token_func = token_func
+        self.token_type = token_type
 
-    def __repr__(self) -> str:
-        return '<SymbolToken value: {0}>'.format(self.value)
-
-    @property
-    def type(self) -> TokenType:
-        return TokenType.SYMBOL
-
-
-class ReplacementToken(Token):
-    def __init__(self) -> None:
-        self.value = ''
-
-    def __repr__(self) -> str:
-        return '<ReplacementToken value: {0}>'.format(self.value)
-
-    @property
-    def type(self) -> TokenType:
-        return TokenType.REPLACEMENT
+    def is_match(self, char: str) -> bool:
+        if self.matcher is not None:
+            return self.matcher(char)
+        return self.character == char
 
 
 class Lexer(object):
-    whitespace_pattern = re.compile(r'^[^\S\n]+')
-    newline_pattern = re.compile(r'^\n+')
-    semicolon_pattern = re.compile(r'^;')
-    quotes_pattern = re.compile(r'^"')
-    assignment_pattern = re.compile(r'^=')
-    symbol_pattern = re.compile(r'^[a-zA-Z0-9]+')
-    simple_replacement_pattern = re.compile(r'^\$([a-zA-Z0-9]+)')
-    block_replacement_pattern = re.compile(r'^\${([a-zA-Z0-9]+)}')
-
     def __init__(self) -> None:
-        pass
+        self.definitions = self.make_definitions()
 
     def lex_all(self, source: str) -> List[Token]:
         tokens = []
@@ -79,44 +54,49 @@ class Lexer(object):
         return tokens
 
     def lex(self, source: str) -> Tuple[Token, str]:
-        for pattern, lex_func in __class__.PATTERNS:
-            match = pattern.match(source)
-            if match is None:
+        character = source[0]
+        for definition in self.definitions:
+            is_match = definition.is_match(character)
+            if not is_match:
                 continue
-            token = lex_func(self, match)
-            substr = source[match.end(0):]
-            return token, substr
-        return Token(), ''
+            end_index = 1
+            if definition.is_compound:
+                while end_index < len(source):
+                    # Subsequent characters must not match other definitions
+                    next_character = source[end_index]
+                    is_same_def = False
+                    for other_def in self.definitions:
+                        if other_def is definition:
+                            is_same_def = True
+                            break
+                        if other_def.is_match(next_character):
+                            break
+                    if not is_same_def or not definition.is_match(next_character):
+                        break
+                    end_index += 1
+            value = source[:end_index]
+            if definition.token_func is not None:
+                token = definition.token_func(value)
+            else:
+                token = Token(definition.token_type, value)
+            return token, source[end_index:]
+        return Token(TokenType.UNKNOWN, character), source[1:]
 
-    def lex_whitespace(self, match: Match) -> Token:
-        return SimpleToken(TokenType.WHITESPACE)
+    def is_whitespace(self, value: str) -> bool:
+        return value.isspace() and value != '\n'
 
-    def lex_end_of_statement(self, match: Match) -> Token:
-        return SimpleToken(TokenType.EOS)
+    def is_symbol(self, value: str) -> bool:
+        return True
 
-    def lex_quotes(self, match: Match) -> Token:
-        return SimpleToken(TokenType.QUOTES)
-
-    def lex_assignment(self, match: Match) -> Token:
-        return SimpleToken(TokenType.ASSIGNMENT)
-
-    def lex_symbol(self, match: Match) -> SymbolToken:
-        token = SymbolToken()
-        token.value = match.group(0)
-        return token
-
-    def lex_replacement(self, match: Match) -> ReplacementToken:
-        token = ReplacementToken()
-        token.value = match.group(1)
-        return token
-
-    PATTERNS: List[Tuple[Pattern, Callable[[Match], Token]]] = [
-        (whitespace_pattern, lex_whitespace),
-        (newline_pattern, lex_end_of_statement),
-        (semicolon_pattern, lex_end_of_statement),
-        (quotes_pattern, lex_quotes),
-        (assignment_pattern, lex_assignment),
-        (symbol_pattern, lex_symbol),
-        (simple_replacement_pattern, lex_replacement),
-        (block_replacement_pattern, lex_replacement)
-    ]
+    def make_definitions(self) -> List[TokenLexDefinition]:
+        return [
+            TokenLexDefinition(matcher=self.is_whitespace, is_compound=True, token_type=TokenType.WHITESPACE),
+            TokenLexDefinition(character='\n', is_compound=True, token_type=TokenType.EOS),
+            TokenLexDefinition(character=';', token_type=TokenType.EOS),
+            TokenLexDefinition(character='"', token_type=TokenType.QUOTES),
+            TokenLexDefinition(character='=', token_type=TokenType.ASSIGNMENT),
+            TokenLexDefinition(character="$", token_type=TokenType.DOLLAR_SIGN),
+            TokenLexDefinition(character="{", token_type=TokenType.LEFT_CURLY_BRACKET),
+            TokenLexDefinition(character='}', token_type=TokenType.RIGHT_CURLY_BRACKET),
+            TokenLexDefinition(matcher=self.is_symbol, is_compound=True, token_type=TokenType.SYMBOL)
+        ]

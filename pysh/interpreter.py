@@ -3,7 +3,7 @@ import sys
 from typing import List, Iterable, Dict, Callable, Tuple
 
 from pysh import builtins
-from pysh.builtins import InvokeInfo
+from pysh.builtins import InvokeInfo, test
 from pysh.instructions import InstructionVisitor, Instruction, ConcatInstruction, SubstituteInstruction, \
     SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
     IncrementAInstruction, PushAInstruction, CallInstruction, BranchReturnValueInstruction, \
@@ -48,7 +48,7 @@ class Interpreter(InstructionVisitor):
         self.buffer += instruction.value
 
     def visit_substitute(self, instruction: SubstituteInstruction) -> None:
-        value = self.context.variables.get(instruction.value, '')
+        value = self.get_var(instruction.value)
         parts = value.split(' ')
 
         # remove empty parts
@@ -126,8 +126,15 @@ class Interpreter(InstructionVisitor):
             env.append((var_name, self.context.variables.get(var_name, '')))
         return env
 
+    def get_var(self, name: str) -> str:
+        if name == '?':
+            return str(self.rv)
+        return self.context.variables.get(name, '')
+
 
 def install_builtins(interpreter: Interpreter) -> None:
     registry = interpreter.builtins
     registry['ls'] = builtins.ls
     registry['exit'] = builtins.exit
+    registry['test'] = builtins.test.test
+    registry['echo'] = builtins.echo
