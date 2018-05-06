@@ -57,6 +57,11 @@ class PushAInstruction(Instruction):
         visitor.visit_push_a(self)
 
 
+class PopAInstruction(Instruction):
+    def accept(self, visitor: 'InstructionVisitor') -> None:
+        visitor.visit_pop_a(self)
+
+
 class CallInstruction(Instruction):
     def accept(self, visitor: 'InstructionVisitor') -> None:
         visitor.visit_call(self)
@@ -75,12 +80,25 @@ class BranchReturnValueInstruction(Instruction):
         visitor.visit_branch_return_value(self)
 
 
+class BranchIfANotZeroInstruction(Instruction):
+    def __init__(self, offset: int) -> None:
+        self.offset = offset
+
+    def accept(self, visitor: 'InstructionVisitor') -> None:
+        visitor.visit_branch_if_a_not_zero(self)
+
+
 class BranchBufferEmptyInstruction(Instruction):
     def __init__(self, offset: int) -> None:
         self.offset = offset
 
     def accept(self, visitor: 'InstructionVisitor') -> None:
         visitor.visit_branch_buffer_empty(self)
+
+
+class AddRVToAInstruction(Instruction):
+    def accept(self, visitor: 'InstructionVisitor') -> None:
+        visitor.visit_add_rv_to_a(self)
 
 
 class JumpRelativeInstruction(Instruction):
@@ -93,40 +111,49 @@ class JumpRelativeInstruction(Instruction):
 
 class InstructionVisitor(object):
     def visit_concat(self, instruction: ConcatInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_substitute(self, instruction: SubstituteInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_substitute_single(self, instruction: SubstituteSingleInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_load_buffer(self, instruction: LoadBufferInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_push_buffer(self, instruction: PushBufferInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_reset_a(self, instruction: ResetAInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_increment_a(self, instruction: IncrementAInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_push_a(self, instruction: PushAInstruction) -> None:
-        pass
+        raise NotImplementedError()
+
+    def visit_pop_a(self, instruction: PopAInstruction) -> None:
+        raise NotImplementedError()
 
     def visit_call(self, instruction: CallInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_set_var(self, instruction: SetVarInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_branch_return_value(self, instruction: BranchReturnValueInstruction) -> None:
-        pass
+        raise NotImplementedError()
+
+    def visit_branch_if_a_not_zero(self, isntruction: BranchIfANotZeroInstruction) -> None:
+        raise NotImplementedError()
 
     def visit_branch_buffer_empty(self, instruction: BranchBufferEmptyInstruction) -> None:
-        pass
+        raise NotImplementedError()
 
     def visit_jump_relative(self, instruction: JumpRelativeInstruction) -> None:
-        pass
+        raise NotImplementedError()
+
+    def visit_add_rv_to_a(self, instruction: AddRVToAInstruction) -> None:
+        raise NotImplementedError()

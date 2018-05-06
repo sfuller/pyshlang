@@ -1,10 +1,11 @@
-from typing import List, Iterable
+from typing import List, Iterable, Optional
 
 from pysh.instructions import Instruction, LoadBufferInstruction, ResetAInstruction, ConcatInstruction, \
     SubstituteInstruction, SubstituteSingleInstruction, BranchBufferEmptyInstruction, PushBufferInstruction, \
-    IncrementAInstruction, CallInstruction, SetVarInstruction
+    IncrementAInstruction, CallInstruction, SetVarInstruction, PushAInstruction, PopAInstruction, AddRVToAInstruction, \
+    BranchReturnValueInstruction, JumpRelativeInstruction, BranchIfANotZeroInstruction
 from pysh.syntaxnodes import SyntaxNode, CommandNode, ArgumentPartNode, ArgumentNode, ArgumentPartType, \
-    SyntaxNodeVisitor, AssignmentNode
+    SyntaxNodeVisitor, AssignmentNode, AssignmentsNode, ConditionalNode
 
 
 class CodeGenVisitor(SyntaxNodeVisitor):
@@ -51,6 +52,44 @@ class CodeGenVisitor(SyntaxNodeVisitor):
             elif part.type == ArgumentPartType.REPLACEMENT or part.type == ArgumentPartType.REPLACEMENT_SINGLE:
                 self.code.append(SubstituteSingleInstruction(part.value))
         self.code.append(SetVarInstruction())
+
+    def visit_assignments_node(self, node: AssignmentsNode) -> None:
+        for assignment_node in node.assignments:
+            self.visit_assignment_node(assignment_node)
+
+    def visit_conditional_node(self, node: ConditionalNode) -> None:
+        self.code.append(ResetAInstruction())
+        for expr in node.evaluation_expressions:
+            self.code.append(PushAInstruction())
+            expr.accept(self)
+            self.code.append(PopAInstruction())
+            self.code.append(AddRVToAInstruction())
+            self.code.append(PushAInstruction())
+
+        self.code.append(PopAInstruction())
+        branch_ins = BranchIfANotZeroInstruction(0)
+        start_pos = len(self.code)
+        self.code.append(branch_ins)
+
+        for expr in node.conditional_expressions:
+            expr.accept(self)
+
+        skip_else_jump_ins: Optional[JumpRelativeInstruction] = None
+        skip_else_jump_pos = len(self.code)
+        if len(node.else_expressions) > 0:
+            skip_else_jump_ins = JumpRelativeInstruction(0)
+            self.code.append(skip_else_jump_ins)
+
+        condition_false_pos = len(self.code)
+
+        for expr in node.else_expressions:
+            expr.accept(self)
+
+        end_pos = len(self.code)
+
+        branch_ins.offset = condition_false_pos - 1 - start_pos
+        if skip_else_jump_ins is not None:
+            skip_else_jump_ins.offset = end_pos - 1 - skip_else_jump_pos
 
 
 class CodeGenerator(object):

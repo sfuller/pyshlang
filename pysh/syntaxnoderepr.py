@@ -1,6 +1,7 @@
 from typing import List, Iterable
 
-from pysh.syntaxnodes import SyntaxNodeVisitor, ArgumentPartNode, ArgumentNode, CommandNode, AssignmentNode, SyntaxNode
+from pysh.syntaxnodes import SyntaxNodeVisitor, ArgumentPartNode, ArgumentNode, CommandNode, AssignmentNode, SyntaxNode, \
+    ConditionalNode, AssignmentsNode
 
 
 class SyntaxNodeReprVisitor(SyntaxNodeVisitor):
@@ -32,6 +33,20 @@ class SyntaxNodeReprVisitor(SyntaxNodeVisitor):
         self.indent_level += 1
         self.visit_argument_node(node.expr)
         self.indent_level -= 2
+
+    def visit_assignments_node(self, node: AssignmentsNode) -> None:
+        self.add_line('Assignments:\n')
+        self.indent_level += 1
+        self.add_list('assignments', node.assignments)
+        self.indent_level -= 1
+
+    def visit_conditional_node(self, node: ConditionalNode) -> None:
+        self.add_line('Conditional:\n')
+        self.indent_level += 1
+        self.add_list('conditions', node.evaluation_expressions)
+        self.add_list('true_nodes', node.conditional_expressions)
+        self.add_list('else_nodes', node.else_expressions)
+        self.indent_level -= 1
 
     def add_line(self, val: str) -> None:
         for i in range(self.indent_level):

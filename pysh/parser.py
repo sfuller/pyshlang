@@ -301,6 +301,9 @@ class ConditionalState(ParserState):
 
         token = tokens[0]
 
+        if token.type is TokenType.WHITESPACE:
+            return StateTickResult(tokens_to_eat=1)
+
         if not self.has_parsed_if:
             self.has_parsed_if = True
             return StateTickResult(tokens_to_eat=1)
@@ -354,7 +357,7 @@ class ConditionalState(ParserState):
         if token.type is not TokenType.FI:
             self.has_parsed_else_expressions = False
             return StateTickResult()
-        StateTickResult(is_done=True, tokens_to_eat=1)
+        return StateTickResult(is_done=True, tokens_to_eat=1)
 
     @property
     def node(self) -> SyntaxNode:

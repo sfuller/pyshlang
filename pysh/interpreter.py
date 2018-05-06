@@ -9,7 +9,8 @@ from pysh.builtins import InvokeInfo, test
 from pysh.instructions import InstructionVisitor, Instruction, ConcatInstruction, SubstituteInstruction, \
     SubstituteSingleInstruction, LoadBufferInstruction, PushBufferInstruction, ResetAInstruction, \
     IncrementAInstruction, PushAInstruction, CallInstruction, BranchReturnValueInstruction, \
-    BranchBufferEmptyInstruction, JumpRelativeInstruction, SetVarInstruction
+    BranchBufferEmptyInstruction, JumpRelativeInstruction, SetVarInstruction, AddRVToAInstruction, \
+    BranchIfANotZeroInstruction, PopAInstruction
 
 
 class Context(object):
@@ -85,10 +86,18 @@ class Interpreter(InstructionVisitor):
     def visit_push_a(self, instruction: PushAInstruction) -> None:
         self.stack.append(str(self.reg_a))
 
+    def visit_pop_a(self, instruction: PopAInstruction) -> None:
+        val = self.stack.pop()
+        try:
+            int_val = int(val)
+        except ValueError as e:
+            raise ExecutionError('Cannot pop top of stack to register a, top of stack is not an integer value.') from e
+        self.reg_a = int_val
+
     def visit_call(self, instruction: CallInstruction) -> None:
         stack_len = len(self.stack)
         if stack_len < self.reg_a:
-            raise ExecutionError('Stack underflow! Bad code given to interpreter or interpreter bug.')
+            raise ExecutionError('Cannot call, stack underflow.')
         stack_start = stack_len - self.reg_a
         args = self.stack[stack_start:]
         del self.stack[stack_start:]
@@ -96,7 +105,6 @@ class Interpreter(InstructionVisitor):
         if len(args) is 0:
             return
 
-        target: Callable[[InvokeInfo], int]
         command_name = args[0]
         target = self.builtins.get(command_name)
 
@@ -117,8 +125,15 @@ class Interpreter(InstructionVisitor):
         if len(self.buffer) is 0:
             self.pc += instruction.offset
 
+    def visit_branch_if_a_not_zero(self, instruction: BranchIfANotZeroInstruction) -> None:
+        if self.reg_a is not 0:
+            self.pc += instruction.offset
+
     def visit_jump_relative(self, instruction: JumpRelativeInstruction) -> None:
         self.pc += instruction.offset
+
+    def visit_add_rv_to_a(self, instruction: AddRVToAInstruction) -> None:
+        self.reg_a += self.rv
 
     def get_child_env(self) -> List[Tuple[str, str]]:
         env: List[Tuple[str, str]] = []
