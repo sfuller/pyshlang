@@ -220,14 +220,17 @@ def parse(tokens: List[Token]) -> Node:
     token_offset += consumed
 
     if tokens[token_offset].type is not TokenType.EOL:
-        raise Exception('Too many arguments')
+        raise EvaluationError('Too many arguments')
 
     return node
 
 
 def test(info: InvokeInfo) -> int:
+    if len(info.arguments) < 2:
+        return 1
+
     try:
-        tokens = lex(info.arguments)
+        tokens = lex(info.arguments[1:])
         node = parse(tokens)
         visitor = EvaluateVisitor()
         node.accept(visitor)

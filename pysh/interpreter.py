@@ -1,5 +1,7 @@
 import os
 import sys
+
+import subprocess
 from typing import List, Iterable, Dict, Callable, Tuple
 
 from pysh import builtins
@@ -23,6 +25,7 @@ class ExecutionError(Exception):
 
 class Interpreter(InstructionVisitor):
     def __init__(self) -> None:
+        self.error_label = 'pysh'
         self.context = Context()
         self.stack: List[str] = []
         self.code: List[Instruction] = []
@@ -42,7 +45,7 @@ class Interpreter(InstructionVisitor):
                 instruction.accept(self)
                 self.pc += 1
         except ExecutionError as e:
-            sys.stderr.write(str(e))
+            self.print_error(str(e))
 
     def visit_concat(self, instruction: ConcatInstruction) -> None:
         self.buffer += instruction.value
@@ -93,17 +96,14 @@ class Interpreter(InstructionVisitor):
         if len(args) is 0:
             return
 
-        command_name = args[0]
-
         target: Callable[[InvokeInfo], int]
+        command_name = args[0]
         target = self.builtins.get(command_name)
 
         if target is None:
-            self.rv = 127
-            sys.stderr.write('pysh: {0}: command not found\n'.format(command_name))
-            return
+            target = self.invoke_subprocess
 
-        invoke_info = InvokeInfo(args[1:], self.get_child_env(), '', self.context.pwd)
+        invoke_info = InvokeInfo(args, self.get_child_env(), '', self.context.pwd)
         self.rv = target(invoke_info)
 
     def visit_set_var(self, instruction: SetVarInstruction) -> None:
@@ -130,6 +130,17 @@ class Interpreter(InstructionVisitor):
         if name == '?':
             return str(self.rv)
         return self.context.variables.get(name, '')
+
+    def invoke_subprocess(self, info: InvokeInfo) -> int:
+        try:
+            result = subprocess.run(info.arguments, cwd=info.pwd, env={})
+        except OSError:
+            self.print_error('failed to execute ' + info.arguments[0])
+            return 127
+        return result.returncode
+
+    def print_error(self, message: str) -> None:
+        sys.stderr.write('{0}: {1}\n'.format(self.error_label, message))
 
 
 def install_builtins(interpreter: Interpreter) -> None:

@@ -1,5 +1,3 @@
-import sys
-from pysh.interactive import Interactive
+import pysh
 
-instance = Interactive()
-sys.exit(instance.main())
+pysh.main()

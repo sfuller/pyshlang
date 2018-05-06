@@ -19,16 +19,18 @@ def ls(info: InvokeInfo) -> int:
 
 def exit(info: InvokeInfo) -> int:
     rv = 0
-    if len(info.arguments) > 0:
+    if len(info.arguments) > 1:
         try:
-            rv = int(info.arguments[0])
+            rv = int(info.arguments[1])
         except ValueError:
             pass
     sys.exit(rv)
+    # noinspection PyUnreachableCode
+    return 1
 
 
 def echo(info: InvokeInfo) -> int:
-    print(' '.join(info.arguments))
+    print(' '.join(info.arguments[1:]))
     return 0
 
 
