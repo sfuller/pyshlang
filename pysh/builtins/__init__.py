@@ -31,3 +31,10 @@ def echo(info: InvokeInfo) -> int:
     print(' '.join(info.arguments))
     return 0
 
+
+def true(info: InvokeInfo) -> int:
+    return 0
+
+
+def false(info: InvokeInfo) -> int:
+    return 1

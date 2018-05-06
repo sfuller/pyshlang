@@ -1,7 +1,7 @@
-from typing import List, Iterable, Optional
+from typing import List, Optional
 from pysh.lexer import Token, TokenType
 from pysh.syntaxnodes import SyntaxNode, ArgumentNode, ArgumentPartNode, ArgumentPartType, CommandNode, \
-    AssignmentNode
+    AssignmentNode, AssignmentsNode, ConditionalNode
 
 
 class ParseError(Exception):
@@ -22,8 +22,9 @@ class ParserState(object):
     def tick(self, tokens: List[Token]) -> StateTickResult:
         return StateTickResult(is_done=True, tokens_to_eat=0)
 
-    def take_nodes(self) -> List[SyntaxNode]:
-        return []
+    @property
+    def node(self) -> Optional[SyntaxNode]:
+        return None
 
 
 class TopLevelExpressionState(ParserState):
@@ -37,12 +38,15 @@ class TopLevelExpressionState(ParserState):
         if len(tokens) is 0:
             return StateTickResult(is_done=True)
 
-        type = tokens[0].type
+        token = tokens[0]
+        type = token.type
 
         if type is TokenType.WHITESPACE or type is TokenType.EOS:
             return StateTickResult(is_done=True, tokens_to_eat=1)
         elif type is TokenType.SYMBOL or type is TokenType.DOLLAR_SIGN or type is TokenType.QUOTES:
             return self.enter_child(ExpressionState())
+        elif type is TokenType.IF:
+            return self.enter_child(ConditionalState())
 
         raise ParseError('Unexpected token {0} in top level expression'.format(type))
 
@@ -50,10 +54,11 @@ class TopLevelExpressionState(ParserState):
         self.child_state = child_state
         return StateTickResult(is_done=False, tokens_to_eat=0, child_state=child_state)
 
-    def take_nodes(self) -> List[SyntaxNode]:
+    @property
+    def node(self) -> Optional[SyntaxNode]:
         if self.child_state is None:
-            return []
-        return self.child_state.take_nodes()
+            return None
+        return self.child_state.node
 
 
 class ReplacementState(ParserState):
@@ -101,9 +106,6 @@ class ReplacementState(ParserState):
 
         return StateTickResult(is_done=True)
 
-    def take_nodes(self) -> List[SyntaxNode]:
-        return []
-
     def get_replacement_key(self) -> str:
         return ''.join(self.key_parts)
 
@@ -114,7 +116,7 @@ class ArgumentState(ParserState):
         self.is_inside_quotes = False
         self.replacement_state: Optional[ReplacementState] = None
         self.parsed_nodes: List[SyntaxNode] = []
-        self.node = ArgumentNode()
+        self._node = ArgumentNode()
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
         if self.replacement_state is not None:
@@ -150,18 +152,16 @@ class ArgumentState(ParserState):
 
         raise ParseError('Unexpected token while parsing expression: ' + str(token.type))
 
-    def take_nodes(self) -> List[SyntaxNode]:
-        nodes = self.parsed_nodes
-        self.parsed_nodes = []
-        return nodes
+    @property
+    def node(self) -> SyntaxNode:
+        return self._node
 
-    def make_argument_node(self) -> ArgumentNode:
-        return self.node
+    @property
+    def argument_node(self) -> ArgumentNode:
+        return self._node
 
     def _finish_node(self) -> StateTickResult:
-        self.node.parts = self.arg_parts
-        self.arg_parts = []
-        self.parsed_nodes.append(self.node)
+        self._node.parts = self.arg_parts
         return StateTickResult(is_done=True, tokens_to_eat=0)
 
 
@@ -172,12 +172,13 @@ class ExpressionState(ParserState):
         self.command_state: Optional[CommandState] = None
         self.has_parsed_assignments = False
         self.has_parsed_command = False
-        self.parsed_nodes = []
+        self.command_node: Optional[CommandNode] = None
+        self.assignments_node: Optional[AssignmentsNode] = None
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
         if self.assignment_state is not None:
             # We have returned from parsing an env assignment.
-            self.assignments.append(self.assignment_state.node)
+            self.assignments.append(self.assignment_state.assignment_node)
             self.assignment_state = None
 
         if self.command_state is not None:
@@ -195,11 +196,13 @@ class ExpressionState(ParserState):
             # Finish parsing expression
             if self.command_state is not None and len(self.command_state.args) > 0:
                 # We are invoking a command, not assigning variables.
-                self.parsed_nodes.append(CommandNode(self.command_state.args, self.assignments))
+                self.command_node = CommandNode()
+                self.command_node.args = self.command_state.args
+                self.command_node.env_assignments = self.assignments
             else:
                 # We are making variable assignments.
-                self.parsed_nodes.extend(self.assignments)
-            self.assignments = []
+                self.assignments_node = AssignmentsNode()
+                self.assignments_node.assignments.extend(self.assignments)
             return StateTickResult(is_done=True, tokens_to_eat=1)
 
         if not self.has_parsed_assignments:
@@ -213,10 +216,13 @@ class ExpressionState(ParserState):
             self.command_state = CommandState()
             return StateTickResult(child_state=self.command_state)
 
-    def take_nodes(self) -> Iterable[SyntaxNode]:
-        nodes = self.parsed_nodes
-        self.parsed_nodes = []
-        return nodes
+    @property
+    def node(self) -> SyntaxNode:
+        if self.command_node is not None:
+            return self.command_node
+        if self.assignments_node is not None:
+            return self.assignments_node
+        return SyntaxNode()
 
 
 class CommandState(ParserState):
@@ -226,7 +232,7 @@ class CommandState(ParserState):
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
         if self.arg_state is not None:
-            self.args.append(self.arg_state.make_argument_node())
+            self.args.append(self.arg_state.argument_node)
             self.arg_state = None
 
         if len(tokens) is 0:
@@ -242,16 +248,13 @@ class CommandState(ParserState):
         self.arg_state = ArgumentState()
         return StateTickResult(child_state=self.arg_state)
 
-    def take_nodes(self) -> List[SyntaxNode]:
-        return []
-
 
 class AssignmentState(ParserState):
     def __init__(self) -> None:
         self.lhs_var_name: Optional[str] = None
         self.rhs_arg_state: Optional[ArgumentState] = None
         self.parsed_nodes: List[SyntaxNode] = []
-        self.node = AssignmentNode()
+        self._node = AssignmentNode()
 
     def tick(self, tokens: List[Token]) -> StateTickResult:
         if len(tokens) is 0:
@@ -268,14 +271,94 @@ class AssignmentState(ParserState):
             return StateTickResult(child_state=self.rhs_arg_state)
 
         self.node.var_name = self.lhs_var_name
-        self.node.expr = self.rhs_arg_state.make_argument_node()
+        self.node.expr = self.rhs_arg_state.argument_node
         self.parsed_nodes.append(self.node)
         return StateTickResult(is_done=True, tokens_to_eat=0)
 
-    def take_nodes(self) -> List[SyntaxNode]:
-        nodes = self.parsed_nodes
-        self.parsed_nodes = []
-        return nodes
+    @property
+    def node(self) -> SyntaxNode:
+        return self._node
+
+    @property
+    def assignment_node(self) -> AssignmentNode:
+        return self._node
+
+
+class ConditionalState(ParserState):
+    def __init__(self) -> None:
+        self.has_parsed_if = False
+        self.has_parsed_conditions = False
+        self.has_parsed_then = False
+        self.has_parsed_expressions = False
+        self.has_parsed_else = False
+        self.has_parsed_else_expressions = False
+        self.expression_state: Optional[ExpressionState] = None
+        self._node = ConditionalNode()
+
+    def tick(self, tokens: List[Token]) -> StateTickResult:
+        if len(tokens) is 0:
+            return StateTickResult(is_incomplete=True)
+
+        token = tokens[0]
+
+        if not self.has_parsed_if:
+            self.has_parsed_if = True
+            return StateTickResult(tokens_to_eat=1)
+
+        if not self.has_parsed_conditions:
+            if self.expression_state is None:
+                self.expression_state = ExpressionState()
+                return StateTickResult(child_state=self.expression_state)
+            else:
+                self._node.evaluation_expressions.append(self.expression_state.node)
+                self.has_parsed_conditions = True
+                self.expression_state = None
+                return StateTickResult()
+
+        if not self.has_parsed_then:
+            if token.type is not TokenType.THEN:
+                self.has_parsed_conditions = False
+                return StateTickResult()
+            self.has_parsed_then = True
+            return StateTickResult(tokens_to_eat=1)
+
+        if not self.has_parsed_expressions:
+            if self.expression_state is None:
+                self.expression_state = ExpressionState()
+                return StateTickResult(child_state=self.expression_state)
+            else:
+                self._node.conditional_expressions.append(self.expression_state.node)
+                self.has_parsed_expressions = True
+                self.expression_state = None
+                return StateTickResult()
+
+        if not self.has_parsed_else:
+            if token.type is TokenType.FI:
+                return StateTickResult(is_done=True, tokens_to_eat=1)
+            elif token.type is TokenType.ELSE:
+                self.has_parsed_else = True
+                return StateTickResult(tokens_to_eat=1)
+            else:
+                self.has_parsed_expressions = False
+                return StateTickResult()
+
+        if not self.has_parsed_else_expressions:
+            if self.expression_state is None:
+                self.expression_state = ExpressionState()
+                return StateTickResult(child_state=self.expression_state)
+            else:
+                self._node.else_expressions.append(self.expression_state.node)
+                self.has_parsed_else_expressions = True
+                self.expression_state = None
+
+        if token.type is not TokenType.FI:
+            self.has_parsed_else_expressions = False
+            return StateTickResult()
+        StateTickResult(is_done=True, tokens_to_eat=1)
+
+    @property
+    def node(self) -> SyntaxNode:
+        return self._node
 
 
 class Parser(object):
@@ -288,14 +371,19 @@ class Parser(object):
 
     def parse(self, tokens: List[Token]) -> List[SyntaxNode]:
         self.tokens.extend(tokens)
-        self.process_tokens()
+        try:
+            self._process_tokens()
+        except ParseError as e:
+            self.reset()
+            raise e
+
         if self.is_done:
             result_nodes = self.nodes
             self.nodes = []
             return result_nodes
         return []
 
-    def process_tokens(self) -> None:
+    def _process_tokens(self) -> None:
         if self.state is None:
             self.state = TopLevelExpressionState()
         while self.state is not None:
@@ -309,13 +397,22 @@ class Parser(object):
                 if len(self.state_stack) > 0:
                     self.state = self.state_stack.pop()
                 else:
-                    self.nodes.extend(self.state.take_nodes())
+                    new_node = self.state.node
+                    if new_node is not None:
+                        self.nodes.append(new_node)
                     if len(self.tokens) > 0:
                         self.state = TopLevelExpressionState()
                     else:
                         self.state = None
             if result.is_incomplete:
                 break
+
+    def reset(self) -> None:
+        self.syntax.clear()
+        self.tokens.clear()
+        self.state = None
+        self.state_stack.clear()
+        self.nodes.clear()
 
     @property
     def is_done(self) -> bool:

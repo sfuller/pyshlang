@@ -111,7 +111,7 @@ class Interpreter(InstructionVisitor):
         self.context.variables[var_name] = self.buffer
 
     def visit_branch_return_value(self, instruction: BranchReturnValueInstruction) -> None:
-        raise Exception("TODO")
+        raise NotImplementedError()
 
     def visit_branch_buffer_empty(self, instruction: BranchBufferEmptyInstruction) -> None:
         if len(self.buffer) is 0:
@@ -138,3 +138,5 @@ def install_builtins(interpreter: Interpreter) -> None:
     registry['exit'] = builtins.exit
     registry['test'] = builtins.test.test
     registry['echo'] = builtins.echo
+    registry['true'] = builtins.true
+    registry['false'] = builtins.false
